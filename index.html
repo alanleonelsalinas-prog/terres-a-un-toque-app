@@ -1,1 +1,332 @@
 
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#facc15">
+<title>Terre's + A un Toque</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{font-family:system-ui,sans-serif;color:#191919;background:#f4f4f1}
+*{box-sizing:border-box}
+body{margin:0}
+header{background:#171717;color:white;padding:20px;border-bottom:5px solid #facc15}
+header strong{font-size:21px}
+header small{display:block;color:#ccc;margin-top:4px}
+main{max-width:760px;margin:auto;padding:16px}
+.card{background:white;border:1px solid #ddd;border-radius:16px;padding:18px;margin-bottom:14px}
+h2{margin:0 0 14px;font-size:20px}
+label{display:block;font-weight:650;margin:12px 0 5px}
+input,select,button{width:100%;padding:12px;border-radius:10px;border:1px solid #ccc;font:inherit}
+button{background:#191919;color:white;border:0;font-weight:700;margin-top:10px}
+.yellow{background:#facc15;color:#191919}
+.secondary{background:#eee;color:#191919}
+.hidden{display:none!important}
+.note{font-size:13px;color:#666;line-height:1.5}
+.msg{padding:12px;border-radius:10px;background:#fff2bd;margin:12px 0;overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.products{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.product{background:white;border:1px solid #ddd;color:#191919;text-align:left;padding:13px;min-height:75px}
+.product b,.product span{display:block}
+.product span{font-size:13px;color:#666;margin-top:5px}
+.line{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #eee}
+.line button{width:auto;margin:0;padding:7px 10px}
+.total{font-size:26px;font-weight:800;margin:15px 0}
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:14px}
+.tabs button{font-size:13px;padding:10px 5px}
+.tabs button.active{background:#facc15;color:#191919}
+@media(min-width:550px){.products{grid-template-columns:repeat(3,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<header>
+<strong>TERRE'S <span style="color:#facc15">+</span> A UN TOQUE</strong>
+<small>Sistema de ventas</small>
+</header>
+<main>
+<section id="login" class="card">
+<h2>Ingresar al sistema</h2>
+<p class="note">Usá tu cuenta autorizada por el administrador.</p>
+<label>Correo electrónico</label>
+<input id="email" type="email" autocomplete="username" placeholder="tu@email.com">
+<label>Contraseña</label>
+<input id="password" type="password" autocomplete="current-password" placeholder="Tu contraseña">
+<button id="loginBtn">Iniciar sesión</button>
+<div id="loginMsg" class="msg hidden"></div>
+</section>
+
+<section id="app" class="hidden">
+<div class="card">
+<div class="grid">
+<div><label>Negocio</label><select id="business"></select></div>
+<div><label>Tu cuenta</label><button id="logout" class="secondary">Salir</button></div>
+</div>
+<div id="roleMsg" class="note"></div>
+</div>
+
+<div class="tabs">
+<button class="active" data-view="sale">Nueva venta</button>
+<button data-view="history">Historial</button>
+<button data-view="products">Productos</button>
+</div>
+
+<section id="saleView" class="card">
+<h2>Nueva venta</h2>
+<div id="productGrid" class="products"></div>
+<h3>Carrito</h3>
+<div id="cart"></div>
+<div id="total" class="total">$0</div>
+<label>Medio de pago</label>
+<select id="payment">
+<option value="cash">Efectivo</option>
+<option value="transfer">Transferencia</option>
+</select>
+<button id="saveSale" class="yellow">Confirmar venta</button>
+<div id="saleMsg" class="msg hidden"></div>
+</section>
+
+<section id="historyView" class="card hidden">
+<h2>Ventas del negocio</h2>
+<button id="refreshHistory" class="secondary">Actualizar historial</button>
+<div id="history"></div>
+</section>
+
+<section id="productsView" class="card hidden">
+<h2>Productos</h2>
+<div id="adminProducts" class="hidden">
+<label>Nombre del producto</label>
+<input id="pname" placeholder="Ej. Cheese doble">
+<label>Categoría</label>
+<input id="pcategory" placeholder="Hamburguesas, bebidas...">
+<label>Precio en pesos</label>
+<input id="pprice" type="number" min="0" step="1" placeholder="12500">
+<button id="addProduct" class="yellow">Agregar producto</button>
+</div>
+<div id="productList"></div>
+</section>
+</section>
+
+<div id="globalMsg" class="msg">Conectando con el servicio de la aplicación…</div>
+<p class="note">Versión inicial. No uses ventas reales hasta verificar la seguridad y los permisos de la base de datos.</p>
+</main>
+
+<script>
+const SUPABASE_URL = "https://jtpehdthrflneqaxlwtc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_UgxqDRs1baBs405T4qEEkg_HuWOiP54";
+
+const $ = id => document.getElementById(id);
+const money = n => new Intl.NumberFormat("es-AR", {
+  style:"currency",currency:"ARS",maximumFractionDigits:0
+}).format(Number(n || 0));
+
+let db, user, businesses=[], businessId=null;
+let role="employee", products=[], cart=new Map();
+
+function message(id,text){
+  $(id).textContent=text;
+  $(id).classList.remove("hidden");
+}
+function hide(id){$(id).classList.add("hidden")}
+function show(id){$(id).classList.remove("hidden")}
+function escapeHtml(value){
+  return String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  })[c]);
+}
+
+async function initialize(){
+  try{
+    db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+    const {data:{session},error}=await db.auth.getSession();
+    if(error) throw error;
+    $("globalMsg").textContent="Servicio conectado.";
+    if(session){
+      user=session.user;
+      await startApp();
+    }
+  }catch(e){
+    message("globalMsg","Error de conexión: "+e.message);
+  }
+}
+
+$("loginBtn").onclick=async()=>{
+  const email=$("email").value.trim();
+  const password=$("password").value;
+  if(!email||!password)return message("loginMsg","Completá el correo y la contraseña.");
+  $("loginBtn").disabled=true;
+  try{
+    const {data,error}=await db.auth.signInWithPassword({email,password});
+    if(error)throw error;
+    user=data.user;
+    await startApp();
+  }catch(e){
+    message("loginMsg","No se pudo ingresar: "+e.message);
+  }finally{$("loginBtn").disabled=false}
+};
+
+async function startApp(){
+  try{
+    const {data:members,error}=await db.from("memberships")
+      .select("business_id,role,active")
+      .eq("user_id",user.id).eq("active",true);
+    if(error)throw error;
+    if(!members?.length){
+      message("globalMsg","Tu usuario no tiene negocios asignados. El administrador debe autorizarlo.");
+      return;
+    }
+    role=members.some(m=>m.role==="admin")?"admin":"employee";
+    const ids=members.map(m=>m.business_id);
+    const {data:b,error:be}=await db.from("businesses")
+      .select("id,name").in("id",ids).eq("active",true);
+    if(be)throw be;
+    businesses=b||[];
+    if(!businesses.length)throw new Error("No hay negocios activos asignados.");
+    $("business").innerHTML=businesses.map(b=>
+      `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join("");
+    businessId=$("business").value;
+    $("roleMsg").textContent=role==="admin"
+      ?"Administrador: podés administrar productos."
+      :"Empleado: podés registrar ventas y consultar el historial.";
+    if(role==="admin")show("adminProducts");
+    hide("login");show("app");hide("globalMsg");
+    await refreshData();
+  }catch(e){message("globalMsg","Error al cargar el acceso: "+e.message)}
+}
+
+$("business").onchange=async()=>{
+  businessId=$("business").value;
+  cart.clear();
+  renderCart();
+  await refreshData();
+};
+
+async function refreshData(){
+  await loadProducts();
+  await loadHistory();
+}
+
+async function loadProducts(){
+  const {data,error}=await db.from("products").select("id,name,category,price")
+    .eq("business_id",businessId).eq("active",true)
+    .order("category").order("name");
+  if(error){message("globalMsg","Error al cargar productos: "+error.message);return}
+  products=data||[];
+  renderProducts();
+  renderCart();
+  $("productList").innerHTML=products.map(p=>
+    `<div class="line"><span>${escapeHtml(p.name)}<br><small>${escapeHtml(p.category)}</small></span><b>${money(p.price)}</b></div>`
+  ).join("")||'<p class="note">Todavía no hay productos cargados.</p>';
+}
+
+function renderProducts(){
+  $("productGrid").innerHTML=products.map(p=>
+    `<button class="product" data-product="${p.id}"><b>${escapeHtml(p.name)}</b><span>${money(p.price)}</span></button>`
+  ).join("")||'<p class="note">El administrador debe cargar productos.</p>';
+  document.querySelectorAll("[data-product]").forEach(btn=>{
+    btn.onclick=()=>{
+      const p=products.find(x=>x.id===btn.dataset.product);
+      if(!p)return;
+      const item=cart.get(p.id)||{product:p,quantity:0};
+      item.quantity++;
+      cart.set(p.id,item);
+      renderCart();
+    };
+  });
+}
+
+function renderCart(){
+  let total=0;
+  $("cart").innerHTML=[...cart.values()].map(item=>{
+    const p=item.product,subtotal=Number(p.price)*item.quantity;
+    total+=subtotal;
+    return `<div class="line"><span>${escapeHtml(p.name)} × ${item.quantity}<br><small>${money(subtotal)}</small></span><button class="secondary" data-minus="${p.id}">−</button></div>`;
+  }).join("")||'<p class="note">Todavía no agregaste productos.</p>';
+  $("total").textContent=money(total);
+  document.querySelectorAll("[data-minus]").forEach(btn=>{
+    btn.onclick=()=>{
+      const item=cart.get(btn.dataset.minus);
+      if(!item)return;
+      item.quantity--;
+      if(item.quantity<=0)cart.delete(btn.dataset.minus);
+      renderCart();
+    };
+  });
+}
+
+$("saveSale").onclick=async()=>{
+  if(!cart.size)return message("saleMsg","Agregá al menos un producto.");
+  const total=[...cart.values()].reduce((sum,x)=>
+    sum+Number(x.product.price)*x.quantity,0);
+  $("saveSale").disabled=true;
+  try{
+    const {data:sale,error}=await db.from("sales").insert({
+      business_id:businessId,user_id:user.id,
+      payment_method:$("payment").value,total,status:"confirmed"
+    }).select("id").single();
+    if(error)throw error;
+    const items=[...cart.values()].map(x=>({
+      sale_id:sale.id,product_id:x.product.id,
+      product_name_snapshot:x.product.name,
+      quantity:x.quantity,unit_price:x.product.price
+    }));
+    const {error:itemError}=await db.from("sale_items").insert(items);
+    if(itemError){
+      message("saleMsg","La venta se creó pero falló su detalle. Avisá al administrador y no repitas la operación. Error: "+itemError.message);
+      return;
+    }
+    cart.clear();renderCart();
+    message("saleMsg","Venta guardada: "+money(total));
+    await loadHistory();
+  }catch(e){
+    message("saleMsg","No se pudo registrar la venta: "+e.message);
+  }finally{$("saveSale").disabled=false}
+};
+
+async function loadHistory(){
+  const {data,error}=await db.from("sales")
+    .select("id,total,payment_method,status,created_at")
+    .eq("business_id",businessId)
+    .order("created_at",{ascending:false}).limit(100);
+  if(error){$("history").textContent="Error: "+error.message;return}
+  $("history").innerHTML=(data||[]).map(s=>
+    `<div class="line"><span><b>${money(s.total)}</b><br><small>${new Date(s.created_at).toLocaleString("es-AR")} · ${s.payment_method==="cash"?"Efectivo":"Transferencia"} · ${escapeHtml(s.status)}</small></span></div>`
+  ).join("")||'<p class="note">No hay ventas registradas.</p>';
+}
+$("refreshHistory").onclick=loadHistory;
+
+$("addProduct").onclick=async()=>{
+  if(role!=="admin")return;
+  const name=$("pname").value.trim();
+  const category=$("pcategory").value.trim();
+  const price=Number($("pprice").value);
+  if(!name||!category||!Number.isFinite(price)||price<=0){
+    return alert("Completá el nombre, la categoría y un precio mayor que cero.");
+  }
+  const {error}=await db.from("products").insert({
+    business_id:businessId,name,category,price,active:true,created_by:user.id
+  });
+  if(error)return alert("No se pudo guardar el producto: "+error.message);
+  $("pname").value="";$("pcategory").value="";$("pprice").value="";
+  await loadProducts();
+};
+
+document.querySelectorAll("[data-view]").forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b===btn));
+    ["sale","history","products"].forEach(v=>
+      $(v+"View").classList.toggle("hidden",v!==btn.dataset.view));
+  };
+});
+
+$("logout").onclick=async()=>{
+  await db.auth.signOut();
+  location.reload();
+};
+
+initialize();
+</script>
+</body>
+</html>
+
+
