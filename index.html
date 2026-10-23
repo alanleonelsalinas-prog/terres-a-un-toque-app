@@ -282,6 +282,7 @@ for (let index = 0; index < groupTotals.length; index++) {
   selectedPayment === "mixed" ? "mixed" : selectedPayment;
   const { data: sale, error } = await db.from("sales").insert({
     business_id: bizId,
+    cash_session_id: currentCashSession?.id ?? null,
     user_id: user.id,
     payment_method: paymentMethod,
     total,
