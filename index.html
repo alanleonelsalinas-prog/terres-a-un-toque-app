@@ -55,13 +55,28 @@ button:disabled{opacity:.5}.yellow{background:#facc15;color:#191919}.secondary{b
 <h3>Carrito compartido</h3><div id="cart"></div><div id="cartBreakdown"></div>
 <div id="total" class="total">$0</div>
 
-<label>Importe abonado en efectivo</label>
-<input id="cashAmount" type="number" min="0" step="1" value="0">
-<div class="line">
-  <span>Importe por transferencia</span>
-  <b id="transferAmount">$0</b>
+
+<label for="paymentType">Medio de pago</label>
+<select id="paymentType">
+  <option value="cash">Efectivo</option>
+  <option value="transfer">Transferencia</option>
+  <option value="mixed">Pago mixto (efectivo + transferencia)</option>
+</select>
+
+<div id="mixedPaymentFields" class="hidden">
+  <label for="cashAmount">Importe abonado en efectivo</label>
+  <input id="cashAmount" type="number" min="0" step="1" value="0">
+
+  <div class="line">
+    <span>Importe por transferencia</span>
+    <b id="transferAmount">$0</b>
+  </div>
+
+  <p class="note">
+    Ingresá cuánto paga en efectivo. El resto se registra como transferencia.
+  </p>
 </div>
-<p class="note">Ingresá cuánto paga en efectivo. El resto se registra como transferencia.</p>
+
 <button id="saveSale" class="yellow">Confirmar compra</button><div id="saleMsg" class="msg hidden"></div>
 </section>
 <section id="historyView" class="card hidden"><h2>Ventas del negocio seleccionado</h2><button id="refreshHistory" class="secondary">Actualizar historial</button><div id="history"></div></section>
@@ -168,22 +183,54 @@ function renderCart(){
  }).join("")||'<p class="note">Todavía no agregaste productos.</p>';
  $("cartBreakdown").innerHTML=[...totalsByBusiness.entries()].map(([id,value])=>`<div class="line"><span>Subtotal ${escapeHtml(businessName(id))}</span><b>${money(value)}</b></div>`).join("");
  $("total").textContent=money(total);
- const cashInput = $("cashAmount");
-const cash = Math.min(total, Math.max(0, Number(cashInput.value) || 0));
-if (Number(cashInput.value) > total) cashInput.value = String(total);
-$("transferAmount").textContent = money(total - cash);
- document.querySelectorAll("[data-minus]").forEach(btn=>btn.onclick=()=>{
-  const item=cart.get(btn.dataset.minus);if(!item)return;item.quantity--;if(item.quantity<=0)cart.delete(btn.dataset.minus);renderCart();
- });
+ 
+updatePaymentUI(total);
+
+document.querySelectorAll("[data-minus]").forEach(btn => btn.onclick = () => {
+  const item = cart.get(btn.dataset.minus);
+  if (!item) return;
+  item.quantity--;
+  if (item.quantity <= 0) cart.delete(btn.dataset.minus);
+  renderCart();
+});
 }
-$("cashAmount").addEventListener("input", () => {
-  const total = [...cart.values()].reduce(
+
+function cartTotal() {
+  return [...cart.values()].reduce(
     (sum, item) => sum + Number(item.product.price) * item.quantity,
     0
   );
-  const cash = Math.min(total, Math.max(0, Number($("cashAmount").value) || 0));
+}
+function updatePaymentUI(total = cartTotal()) {
+  const type = $("paymentType").value;
+  const mixedFields = $("mixedPaymentFields");
+  const cashInput = $("cashAmount");
+
+  mixedFields.classList.toggle("hidden", type !== "mixed");
+
+  if (type === "cash") {
+    $("transferAmount").textContent = money(0);
+    return;
+  }
+
+  if (type === "transfer") {
+    $("transferAmount").textContent = money(total);
+    return;
+  }
+
+  const cash = Math.min(
+    total,
+    Math.max(0, Number(cashInput.value) || 0)
+  );
+
+  if (Number(cashInput.value) > total) {
+    cashInput.value = String(total);
+  }
+
   $("transferAmount").textContent = money(total - cash);
-});
+}
+$("paymentType").addEventListener("change", () => updatePaymentUI());
+$("cashAmount").addEventListener("input", () => updatePaymentUI());
 $("saveSale").onclick=async()=>{
  if(!cart.size)return message("saleMsg","Agregá al menos un producto.");
  const groups=new Map();
@@ -203,10 +250,18 @@ const groupTotals = [...groups.entries()].map(([bizId, items]) => ({
 }));
 
 const grandTotal = groupTotals.reduce((sum, g) => sum + g.total, 0);
-const cashTotal = Math.min(
-  grandTotal,
-  Math.max(0, Number($("cashAmount").value) || 0)
-);
+
+const selectedPayment = $("paymentType").value;
+let cashTotal = 0;
+
+if (selectedPayment === "cash") {
+  cashTotal = grandTotal;
+} else if (selectedPayment === "mixed") {
+  cashTotal = Math.min(
+    grandTotal,
+    Math.max(0, Number($("cashAmount").value) || 0)
+  );
+}
 
 let allocatedCash = 0;
 
@@ -221,10 +276,10 @@ for (let index = 0; index < groupTotals.length; index++) {
 
   const transferShare = Math.round((total - cashShare) * 100) / 100;
 
-  const paymentMethod =
-    cashShare > 0 && transferShare > 0 ? "mixed" :
-    cashShare > 0 ? "cash" : "transfer";
-
+  const paymentMethod = selectedPayment === "mixed"
+    ? "mixed"
+    : selectedPayment;
+  selectedPayment === "mixed" ? "mixed" : selectedPayment;
   const { data: sale, error } = await db.from("sales").insert({
     business_id: bizId,
     user_id: user.id,
