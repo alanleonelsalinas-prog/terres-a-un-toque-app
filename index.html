@@ -331,6 +331,91 @@ document.querySelectorAll("[data-view]").forEach(btn=>btn.onclick=()=>{
 if(btn.dataset.view==="cash") loadCashSession();
 });
 $("logout").onclick=async()=>{await db.auth.signOut();location.reload()};
+
+let currentCashSession = null;
+
+function cashMessage(text, isError = false) {
+  $("cashMsg").textContent = text;
+  $("cashMsg").classList.remove("hidden");
+  $("cashMsg").style.color = isError ? "#b91c1c" : "#166534";
+}
+
+async function loadCashSession() {
+  $("cashMsg").classList.add("hidden");
+
+  try {
+    const { data, error } = await db
+      .from("cash_sessions")
+      .select("*")
+      .eq("status", "open")
+      .order("opened_at", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+
+    currentCashSession = data?.[0] || null;
+
+    $("cashStatus").textContent = currentCashSession
+      ? "Caja compartida abierta desde " +
+        new Date(currentCashSession.opened_at).toLocaleString("es-AR")
+      : "No hay una caja abierta. Abrí una para comenzar la jornada.";
+
+    $("cashOpenForm").classList.toggle("hidden", !!currentCashSession);
+    $("cashDetails").classList.toggle("hidden", !currentCashSession);
+
+    if (currentCashSession) {
+      await loadCashSummary();
+    }
+  } catch (error) {
+    cashMessage("No se pudo consultar la caja: " + error.message, true);
+  }
+}
+
+async function openSharedCash() {
+  if (currentCashSession) {
+    cashMessage("Ya hay una caja abierta.");
+    return;
+  }
+
+  const openingCash = Number($("openingCash").value || 0);
+
+  if (!Number.isFinite(openingCash) || openingCash < 0) {
+    cashMessage("Ingresá un efectivo inicial válido.", true);
+    return;
+  }
+
+  try {
+    const anchorBusiness = [...businesses].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )[0];
+
+    if (!anchorBusiness) {
+      throw new Error("No hay negocios asignados a este usuario.");
+    }
+
+    const { data, error } = await db
+      .from("cash_sessions")
+      .insert({
+        business_id: anchorBusiness.id,
+        opened_by: user.id,
+        opening_cash: openingCash,
+        status: "open"
+      })
+      .select("*")
+      .single();
+
+    if (error) throw error;
+
+    currentCashSession = data;
+    $("openingCash").value = "";
+    cashMessage("Caja compartida abierta correctamente.");
+    await loadCashSession();
+  } catch (error) {
+    cashMessage("No se pudo abrir la caja: " + error.message, true);
+  }
+}
+
+$("openCash").onclick = openSharedCash;
 initialize();
 </script>
 </body>
