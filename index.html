@@ -473,6 +473,7 @@ async function loadCashSummary() {
     throw error;
   }
 }
+window.loadCashSummary = loadCashSummary;
 $("openCash").onclick = openSharedCash;
 initialize();
 </script>
